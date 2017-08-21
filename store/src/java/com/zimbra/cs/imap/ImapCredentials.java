@@ -25,6 +25,7 @@ import java.util.Iterator;
 import java.util.Set;
 
 import com.google.common.base.Objects;
+import com.google.common.collect.Sets;
 import com.zimbra.client.ZMailbox;
 import com.zimbra.client.event.ZEventHandler;
 import com.zimbra.common.account.Key;
@@ -158,7 +159,8 @@ public class ImapCredentials implements java.io.Serializable {
     }
 
     protected Set<String> listSubscriptions() throws ServiceException {
-        return getImapMailboxStore().listSubscriptions(getContext());
+        Set<String> subs = getImapMailboxStore().listSubscriptions(getContext());
+        return (subs == null || subs.isEmpty()) ? null : Sets.newHashSet(subs);
     }
 
     protected void subscribe(ImapPath path) throws ServiceException {
