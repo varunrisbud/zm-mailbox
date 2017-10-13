@@ -33,6 +33,8 @@ import javax.mail.internet.MimeBodyPart;
 import javax.mail.internet.MimeMessage;
 import javax.mail.internet.MimeMultipart;
 
+import com.zimbra.cs.event.Event;
+import com.zimbra.cs.event.logger.EventLogger;
 import org.dom4j.QName;
 
 import com.zimbra.client.ZMailbox;
@@ -283,6 +285,16 @@ public class SendMsg extends MailDocumentHandler {
             }
         } catch (Exception e) {
             ZimbraLog.soap.warn("Ignoring error while sending Calendar Invitation Forward Notification", e);
+        }
+
+        //Log SENT event data
+        if(id != null) {
+            try {
+                List<Event> sentEvents = Event.generateSentEvents(mbox.getAccountId(), id.getId(), mm.getFrom()[0], mm.getAllRecipients());
+                EventLogger.getEventLogger().log(sentEvents);
+            } catch (MessagingException e) {
+                ZimbraLog.soap.warn("Couldn't log SENT event for message " + id, e);
+            }
         }
 
         return id;
