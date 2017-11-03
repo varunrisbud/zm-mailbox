@@ -119,6 +119,7 @@ public abstract class MailItemImport implements DataSource.DataImport {
         }
         if (msg == null) {
             DeliveryOptions dopts = new DeliveryOptions().setFolderId(folderId).setFlags(flags);
+            dopts.setDataSourceId(dataSource.getId());
             Folder folder = mbox.getFolderById(octxt, folderId);
             String folderName = folder.getName();
             if (folderName.startsWith("/")) {

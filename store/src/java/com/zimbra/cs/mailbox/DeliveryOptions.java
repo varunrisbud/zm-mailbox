@@ -35,6 +35,7 @@ public class DeliveryOptions {
     private Message.DraftInfo mDraftInfo = null;
     private CustomMetadata mCustomMetadata = null;
     private Mailbox.MessageCallbackContext mCallbackContext = null;
+    private String dsId;
 
     public int getFolderId() { return mFolderId; }
     public boolean getNoICal() { return mNoICal; }
@@ -45,6 +46,7 @@ public class DeliveryOptions {
     public Message.DraftInfo getDraftInfo() { return mDraftInfo; }
     public CustomMetadata getCustomMetadata() { return mCustomMetadata; }
     public Mailbox.MessageCallbackContext getCallbackContext() { return mCallbackContext; }
+    public String geDataSourceId() { return dsId; }
 
     public DeliveryOptions setFolderId(int folderId) {
         mFolderId = folderId;
@@ -98,6 +100,11 @@ public class DeliveryOptions {
 
     public DeliveryOptions setCallbackContext(Mailbox.MessageCallbackContext callbackContext) {
         mCallbackContext = callbackContext;
+        return this;
+    }
+
+    public DeliveryOptions setDataSourceId(String dsId) {
+        this.dsId = dsId;
         return this;
     }
 }
