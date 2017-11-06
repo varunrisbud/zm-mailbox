@@ -91,6 +91,8 @@ public class SolrCloudIndex extends SolrIndexBase {
                 }
             } catch (SolrException | IOException e) {
                 ZimbraLog.index.error("Problem checking if Solr collection exists for account %s" ,accountId, e);
+            } catch (NullPointerException npe) {
+                ZimbraLog.index.error("Varun Index Issue ", npe);
             }
         }
         return solrCollectionProvisioned;
