@@ -130,6 +130,8 @@ public abstract class EventStore {
      */
     protected abstract void deleteEventsByDataSource(String dataSourceId) throws ServiceException;
 
+    protected abstract Long getContactFrequencyCount(String contact) throws ServiceException;
+
     public interface Factory {
 
         public EventStore getEventStore(String accountId);
