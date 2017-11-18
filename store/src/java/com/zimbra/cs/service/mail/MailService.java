@@ -242,5 +242,8 @@ public final class MailService implements DocumentService {
 
         // SearchAction API
         dispatcher.registerHandler(MailConstants.SEARCH_ACTION_REQUEST, new SearchAction());
+
+        // Contact Analytics
+        dispatcher.registerHandler(MailConstants.GET_CONTACT_FREQUENCY_REQUEST, new GetContactFrequency());
     }
 }

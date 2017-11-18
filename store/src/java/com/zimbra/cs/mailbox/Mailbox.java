@@ -150,6 +150,7 @@ import com.zimbra.cs.mailbox.MailItem.TargetConstraint;
 import com.zimbra.cs.mailbox.MailItem.UnderlyingData;
 import com.zimbra.cs.mailbox.MailServiceException.NoSuchItemException;
 import com.zimbra.cs.mailbox.MailboxListener.ChangeNotification;
+import com.zimbra.cs.mailbox.Message.EventFlag;
 import com.zimbra.cs.mailbox.Note.Rectangle;
 import com.zimbra.cs.mailbox.Tag.NormalizedTags;
 import com.zimbra.cs.mailbox.calendar.CalendarMailSender;
@@ -3025,6 +3026,12 @@ public class Mailbox implements MailboxStore {
         if (item == null) {
             ZimbraLog.mailbox.warn("item is null for id [%d] in mailbox [%d]. Virtual conv? [%s] cachedMsg? [%s] sameId? [%s]", id, this.mId, virtualConv, cachedMsg, sameId);
             throw MailItem.noSuchItem(id, type);
+        }
+        // If this is a message, trigger a SEEN event if necessary.
+        // This can happen with IMAP clients, as the FETCH command uses getItemById to sync
+        // messages to the client.
+        if (item instanceof Message) {
+            ((Message) item).advanceEventFlag(EventFlag.seen);
         }
         return item;
     }

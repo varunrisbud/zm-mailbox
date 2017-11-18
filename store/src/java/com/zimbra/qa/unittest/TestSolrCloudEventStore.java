@@ -2,8 +2,6 @@ package com.zimbra.qa.unittest;
 
 import java.io.IOException;
 
-import com.zimbra.cs.account.Account;
-import com.zimbra.cs.event.analytics.contact.ContactFrequencyGraph;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
@@ -17,6 +15,8 @@ import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.params.CoreAdminParams;
 import org.junit.*;
 
+import com.zimbra.cs.account.Account;
+import com.zimbra.cs.event.analytics.contact.ContactFrequencyGraph;
 import com.zimbra.cs.account.Provisioning;
 import com.zimbra.cs.event.SolrCloudEventStore;
 import com.zimbra.cs.event.SolrEventStore;
@@ -30,6 +30,7 @@ import com.zimbra.cs.index.solr.SolrRequestHelper;
 import com.zimbra.cs.index.solr.SolrUtils;
 
 public class TestSolrCloudEventStore extends SolrEventStoreTestBase {
+
 
     private static String CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT_USERNAME = "contactFrequencyGraphTestAccount";
     private static Account CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT;
