@@ -8,8 +8,14 @@ import com.zimbra.common.service.ServiceException;
 import com.zimbra.common.util.ZimbraLog;
 import com.zimbra.cs.account.Provisioning;
 import com.zimbra.cs.account.Server;
+import com.zimbra.cs.event.analytics.contact.ContactAnalytics;
 import com.zimbra.cs.event.logger.EventLogger;
 import com.zimbra.cs.extension.ExtensionUtil;
+import com.zimbra.cs.event.analytics.contact.ContactFrequencyGraphDataPoint;
+
+import java.sql.Timestamp;
+import java.util.List;
+
 
 /**
  * Interface to an event storage backend that allows for querying and deleting of
@@ -24,6 +30,10 @@ public abstract class EventStore {
 
     public EventStore(String accountId) {
         this.accountId = accountId;
+    }
+
+    public String getAccountId() {
+        return accountId;
     }
 
     public static void registerFactory(String prefix, String clazz) {
@@ -43,7 +53,7 @@ public abstract class EventStore {
                 String[] tokens = eventURL.split(":");
                 if (tokens != null && tokens.length > 0) {
                     String backendFactoryName = tokens[0];
-                     factoryClassName = REGISTERED_FACTORIES.get(backendFactoryName);
+                    factoryClassName = REGISTERED_FACTORIES.get(backendFactoryName);
                 }
             } else {
                 throw ServiceException.FAILURE("EventStore is not configured", null);
@@ -120,6 +130,7 @@ public abstract class EventStore {
             ZimbraLog.event.debug("no event store specifed; skipping deleting events for account %s, dsId=%s", accountId, dataSourceId);
         }
     }
+
     /**
      * Delete all event data for this account
      */
@@ -129,6 +140,33 @@ public abstract class EventStore {
      * Delete all events for the specified datasource ID
      */
     protected abstract void deleteEventsByDataSource(String dataSourceId) throws ServiceException;
+
+    /**
+     * Get the count of emails sent and received from a contact. Needed for contact analytics.
+     */
+    public abstract Long getContactFrequencyCount(String contact, ContactAnalytics.ContactFrequencyEventType combined, ContactAnalytics.TimeRange timeRange) throws ServiceException;
+
+    /**
+     * Get the frequency of emails sent and received from a contact for
+     * 1) Current Month
+     *      StartDate - First day of Month
+     *      EndDate - Current date (today)
+     *      Aggregation Unit - Per day
+     *
+     * 2) Last 6 Months
+     *      StartDate - First day of the week 6 months back from the first day of week for the current week
+     *      EndDate - First day of the week of current week
+     *      Aggregation Unit - Per week
+     *      Optional int FirstDayOfWeek - day of the week set as first day of week for attribute 'zimbraPrefCalendarFirstDayOfWeek'
+     *      Default first day of week should be set to Sunday.
+     *      As per 'zimbraPrefCalendarFirstDayOfWeek' 0 = Sunday...6 = Saturday
+     *
+     * 3) Current year
+     *      StartDate - First day of the year
+     *      EndDate - Current date (today)
+     *      Aggregation unit - Per month
+     */
+    public abstract List<ContactFrequencyGraphDataPoint> getContactFrequencyGraph(String contact, Timestamp startDate, Timestamp endDate, String aggregationBucket) throws ServiceException;
 
     public interface Factory {
 

@@ -1,16 +1,8 @@
 package com.zimbra.qa.unittest;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
-
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
 
 import org.apache.solr.client.solrj.SolrQuery;
-import org.apache.solr.client.solrj.SolrRequest.METHOD;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.impl.HttpSolrClient.RemoteSolrException;
@@ -19,20 +11,15 @@ import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.client.solrj.request.QueryRequest;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
-import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.params.CoreAdminParams;
-import org.junit.After;
-import org.junit.Assume;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.*;
 
+import com.zimbra.cs.event.analytics.contact.ContactAnalytics;
+import com.zimbra.cs.account.Account;
 import com.zimbra.cs.account.Provisioning;
-import com.zimbra.cs.event.Event;
 import com.zimbra.cs.event.SolrCloudEventStore;
 import com.zimbra.cs.event.SolrEventStore;
-import com.zimbra.cs.event.Event.EventContextField;
-import com.zimbra.cs.event.Event.EventType;
 import com.zimbra.cs.event.logger.SolrEventCallback;
 import com.zimbra.cs.index.solr.AccountCollectionLocator;
 import com.zimbra.cs.index.solr.JointCollectionLocator;
@@ -44,6 +31,10 @@ import com.zimbra.cs.index.solr.SolrUtils;
 
 public class TestSolrCloudEventStore extends SolrEventStoreTestBase {
 
+
+    private static String CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT_USERNAME = "contactFrequencyGraphTestAccount";
+    private static Account CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT;
+
     private static CloudSolrClient client;
     private static String zkHost;
 
@@ -53,6 +44,9 @@ public class TestSolrCloudEventStore extends SolrEventStoreTestBase {
         Assume.assumeTrue(solrUrl.startsWith("solrcloud"));
         zkHost = solrUrl.substring("solrcloud:".length());
         client = SolrUtils.getCloudSolrClient(zkHost);
+        TestUtil.deleteAccountIfExists(CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT_USERNAME);
+        CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT = TestUtil.createAccount(CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT_USERNAME);
+        CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT_ID = CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT.getId();
         cleanUp();
     }
 
@@ -69,12 +63,18 @@ public class TestSolrCloudEventStore extends SolrEventStoreTestBase {
         deleteCollection(JOINT_COLLECTION_NAME);
         deleteCollection(getAccountCollectionName(ACCOUNT_ID_1));
         deleteCollection(getAccountCollectionName(ACCOUNT_ID_2));
+        deleteCollection(getAccountCollectionName(CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT_ID));
     }
 
     @After
     public void tearDown() throws Exception {
         cleanUp();
         client.close();
+    }
+
+    @AfterClass
+    public static void clean() throws Exception {
+        TestUtil.deleteAccountIfExists(CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT_USERNAME);
     }
 
     @Override
@@ -125,9 +125,55 @@ public class TestSolrCloudEventStore extends SolrEventStoreTestBase {
     }
 
     @Override
-    protected SolrDocumentList executeRequest(String coreOrCollection,
-            QueryRequest req) throws Exception {
+    protected SolrDocumentList executeRequest(String coreOrCollection, QueryRequest req) throws Exception {
         QueryResponse resp = req.process(client);
         return resp.getResults();
+    }
+
+    @Test
+    public void testContactFrequencyCountForAllTimeRanges() throws Exception {
+        for (ContactAnalytics.TimeRange timeRange : getContactFrequencyCountTimeRanges()) {
+            testContactFrequencyCountForAccountCore(timeRange);
+            testContactFrequencyCountForCombinedCore(timeRange);
+        }
+    }
+
+    public void testContactFrequencyCountForAccountCore(ContactAnalytics.TimeRange timeRange) throws Exception {
+        cleanUp();
+        try(SolrEventCallback eventCallback = getAccountCoreCallback()) {
+            testContactFrequencyCount(timeRange, eventCallback, getAccountCollectionName(ACCOUNT_ID_1), getAccountEventStore(ACCOUNT_ID_1));
+        }
+    }
+
+    public void testContactFrequencyCountForCombinedCore(ContactAnalytics.TimeRange timeRange) throws Exception {
+        cleanUp();
+        try(SolrEventCallback eventCallback = getCombinedCoreCallback()) {
+            testContactFrequencyCount(timeRange, eventCallback, JOINT_COLLECTION_NAME, getCombinedEventStore(ACCOUNT_ID_1));
+        }
+    }
+
+    @Test
+    public void testGetContactFrequencyGraphForAllTimeRanges() throws Exception {
+        for (ContactAnalytics.TimeRange timeRange : getContactFrequencyGraphTimeRanges()) {
+            testContactFrequencyGraphForAccountCore(timeRange);
+            testContactFrequencyGraphForCombinedCore(timeRange);
+        }
+    }
+
+    private void testContactFrequencyGraphForAccountCore(ContactAnalytics.TimeRange timeRange) throws Exception {
+        cleanUp();
+        try(SolrEventCallback eventCallback = getAccountCoreCallback()) {
+            String collectionName = getAccountCollectionName(CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT_ID);
+            SolrEventStore eventStore = getAccountEventStore(CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT_ID);
+            testContactFrequencyGraph(timeRange, eventCallback, collectionName, eventStore);
+        }
+    }
+
+    private void testContactFrequencyGraphForCombinedCore(ContactAnalytics.TimeRange timeRange) throws Exception {
+        cleanUp();
+        try(SolrEventCallback eventCallback = getCombinedCoreCallback()) {
+            SolrEventStore eventStore = getCombinedEventStore(CONTACT_FREQUENCY_GRAPH_TEST_ACCOUNT_ID);
+            testContactFrequencyGraph(timeRange, eventCallback, JOINT_COLLECTION_NAME, eventStore);
+        }
     }
 }

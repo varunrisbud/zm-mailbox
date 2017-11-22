@@ -1,15 +1,27 @@
 package com.zimbra.cs.event;
 
 import java.io.IOException;
+import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.TermRangeQuery;
+
+import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.request.UpdateRequest;
+import org.apache.solr.client.solrj.response.QueryResponse;
+import org.apache.solr.client.solrj.response.RangeFacet;
 
 import com.zimbra.common.service.ServiceException;
 import com.zimbra.common.util.ZimbraLog;
+import com.zimbra.cs.event.analytics.contact.ContactAnalytics;
+import com.zimbra.cs.event.analytics.contact.ContactFrequencyGraphDataPoint;
 import com.zimbra.cs.account.Provisioning;
 import com.zimbra.cs.account.Server;
 import com.zimbra.cs.index.LuceneFields;
@@ -18,6 +30,7 @@ import com.zimbra.cs.index.solr.JointCollectionLocator;
 import com.zimbra.cs.index.solr.SolrCollectionLocator;
 import com.zimbra.cs.index.solr.SolrConstants;
 import com.zimbra.cs.index.solr.SolrRequestHelper;
+
 
 /**
  * Base class for SolrCloud / Standalone Solr event backends
@@ -58,6 +71,93 @@ public abstract class SolrEventStore extends EventStore {
         solrHelper.execute(accountId, req);
     }
 
+    @Override
+    public Long getContactFrequencyCount(String contact, ContactAnalytics.ContactFrequencyEventType eventType, ContactAnalytics.TimeRange timeRange) throws ServiceException {
+        SolrQuery solrQuery = new SolrQuery();
+        solrQuery.setRows(0);
+        solrQuery.setQuery(getContactFrequencyQueryForTimeRange(timeRange));
+        solrQuery.addFilterQuery(getQueryToSearchContact(contact, eventType));
+
+        if (solrHelper.needsAccountFilter()) {
+            solrQuery.addFilterQuery(getAccountFilter(accountId));
+        }
+
+        QueryResponse response = (QueryResponse) solrHelper.executeRequest(accountId, solrQuery);
+        return response.getResults().getNumFound();
+    }
+
+    private String getQueryToSearchContact(String contact, ContactAnalytics.ContactFrequencyEventType eventType) {
+        switch (eventType) {
+            case SENT:
+                return searchContactForAnEventTypeInAContextField(contact, Event.EventType.SENT, Event.EventContextField.RECEIVER).toString();
+            case RECEIVED:
+                return searchContactForAnEventTypeInAContextField(contact, Event.EventType.RECEIVED, Event.EventContextField.SENDER).toString();
+            default:
+                return getQueryToSearchContactAsSenderOrReceiver(contact).toString();
+        }
+    }
+
+    private String getContactFrequencyQueryForTimeRange(ContactAnalytics.TimeRange timeRange) {
+        if(ContactAnalytics.TimeRange.FOREVER.equals(timeRange)) {
+            return new MatchAllDocsQuery().toString();
+        }
+        TermRangeQuery rangeQuery = TermRangeQuery.newStringRange(LuceneFields.L_EVENT_TIME, timeRange.getSolrStartDate(), timeRange.getSolrEndDate(), true, true);
+        return rangeQuery.toString();
+    }
+
+    @Override
+    public List<ContactFrequencyGraphDataPoint> getContactFrequencyGraph(String contact, Timestamp startDate, Timestamp endDate, String aggregationBucket) throws ServiceException {
+        SolrQuery solrQuery = new SolrQuery();
+        solrQuery.setQuery(new MatchAllDocsQuery().toString());
+        solrQuery.addDateRangeFacet(LuceneFields.L_EVENT_TIME, startDate, endDate, aggregationBucket);
+        solrQuery.addFilterQuery(getQueryToSearchContactAsSenderOrReceiver(contact).toString());
+
+        if (solrHelper.needsAccountFilter()) {
+            solrQuery.addFilterQuery(getAccountFilter(accountId));
+        }
+
+        QueryResponse response = (QueryResponse) solrHelper.executeRequest(accountId, solrQuery);
+
+        List<ContactFrequencyGraphDataPoint> graphDataPoints = Collections.emptyList();
+        List<RangeFacet> facetRanges = response.getFacetRanges();
+        if(facetRanges != null && facetRanges.size() > 0) {
+            List<RangeFacet.Count> rangeFacetResult = facetRanges.get(0).getCounts();
+            graphDataPoints = new ArrayList<>(rangeFacetResult.size());
+            for (RangeFacet.Count rangeResult : rangeFacetResult) {
+                graphDataPoints.add(new ContactFrequencyGraphDataPoint(rangeResult.getValue(), rangeResult.getCount()));
+            }
+        }
+        return graphDataPoints;
+    }
+
+    private BooleanQuery getQueryToSearchContactAsSenderOrReceiver(String contact) {
+        BooleanQuery sentEventWithContactInReceiverField = searchContactForAnEventTypeInAContextField(contact, Event.EventType.SENT, Event.EventContextField.RECEIVER);
+        BooleanQuery receivedEventWithContactInSenderField = searchContactForAnEventTypeInAContextField(contact, Event.EventType.RECEIVED, Event.EventContextField.SENDER);
+
+        BooleanQuery.Builder searchForContactAsSenderOrReceiver = new BooleanQuery.Builder();
+        searchForContactAsSenderOrReceiver.add(sentEventWithContactInReceiverField, Occur.SHOULD);
+        searchForContactAsSenderOrReceiver.add(receivedEventWithContactInSenderField, Occur.SHOULD);
+
+        return searchForContactAsSenderOrReceiver.build();
+    }
+
+    private BooleanQuery searchContactForAnEventTypeInAContextField(String contact, Event.EventType eventType, Event.EventContextField eventContextField) {
+        TermQuery searchForContactInEventContextField = new TermQuery(new Term(SolrEventDocument.getSolrField(eventContextField), contact));
+        TermQuery searchForEventType = new TermQuery(new Term(LuceneFields.L_EVENT_TYPE, eventType.name()));
+
+        BooleanQuery.Builder searchContactForAnEventTypeInAContextField = new BooleanQuery.Builder();
+        searchContactForAnEventTypeInAContextField.add(searchForContactInEventContextField, Occur.MUST);
+        searchContactForAnEventTypeInAContextField.add(searchForEventType, Occur.MUST);
+
+        return searchContactForAnEventTypeInAContextField.build();
+    }
+
+    private String getAccountFilter(String accountId) {
+        BooleanQuery.Builder accountFilter = new BooleanQuery.Builder();
+        accountFilter.add(new TermQuery(new Term(LuceneFields.L_ACCOUNT_ID, accountId)), Occur.MUST);
+        return accountFilter.build().toString();
+    }
+
     public abstract static class Factory implements EventStore.Factory {
 
         protected SolrRequestHelper solrHelper;
@@ -73,13 +173,13 @@ public abstract class SolrEventStore extends EventStore {
         protected SolrCollectionLocator getCollectionLocator() throws ServiceException {
             SolrCollectionLocator locator;
             switch(server.getEventSolrIndexType()) {
-            case account:
-                locator = new AccountCollectionLocator(SolrConstants.EVENT_CORE_NAME_OR_PREFIX);
-                break;
-            case combined:
-            default:
-                locator = new JointCollectionLocator(SolrConstants.EVENT_CORE_NAME_OR_PREFIX);
-                break;
+                case account:
+                    locator = new AccountCollectionLocator(SolrConstants.EVENT_CORE_NAME_OR_PREFIX);
+                    break;
+                case combined:
+                default:
+                    locator = new JointCollectionLocator(SolrConstants.EVENT_CORE_NAME_OR_PREFIX);
+                    break;
             }
             return locator;
         }

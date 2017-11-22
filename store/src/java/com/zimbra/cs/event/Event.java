@@ -173,16 +173,26 @@ public class Event {
             ParsedMessage pm = msg.getParsedMessage();
             MimeMessage mm = pm.getMimeMessage();
             Address[] recipients = mm.getAllRecipients();
-            Address sender = mm.getFrom()[0];
+            String sender = pm.getSender();
+            if (sender == null || recipients == null) {
+                return Collections.emptyList();
+            }
             List<Event> sentEvents = new ArrayList<>(recipients.length);
             for (Address address : recipients) {
-                sentEvents.add(generateSentEvent(acctId, msgId, sender.toString(), address.toString(), dsId, timestamp));
+                sentEvents.add(generateSentEvent(acctId, msgId, sender, address.toString(), dsId, timestamp));
             }
             return sentEvents;
         } catch (MessagingException | ServiceException e) {
             ZimbraLog.event.warn("unable to generate SENT events for message %d", msg.getId());
             return Collections.emptyList();
         }
+    }
+
+    /**
+     * Convenience method to generate a single RECEIVED event
+     */
+    public static Event generateReceivedEvent(String accountId, int messageId, String sender, String recipient, String dsId, Long timestamp) {
+        return generateEvent(accountId, messageId, sender, recipient, EventType.RECEIVED, dsId, timestamp);
     }
 
     /**
