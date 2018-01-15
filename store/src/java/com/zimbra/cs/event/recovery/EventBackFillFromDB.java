@@ -32,7 +32,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class EventBackFillFromDB {
-    public static void init() throws ServiceException, IOException {
+    public static void init(Integer batchSize, Integer numThread) throws ServiceException, IOException {
         //Initialize Database
         DbPool.startup();
 
@@ -54,16 +54,17 @@ public class EventBackFillFromDB {
 
         prov.getLocalServer().setIndexURL("solrcloud:solr:9983");
         prov.getLocalServer().setEventBackendURL("solrcloud:solr:9983");
-        prov.getLocalServer().setEventBatchMaxSize(1);
+        prov.getLocalServer().setEventBatchMaxSize(batchSize);
+        prov.getLocalServer().setEventLoggingNumThreads(numThread);
 
         EventLogger.getEventLogger().startupEventNotifierExecutor();
     }
 
     public static void cleanup() throws Exception {
+        EventLogger.getEventLogger().shutdownEventLogger();
         DbPool.shutdown();
         IndexStore.getFactory().destroy();
         StoreManager.getInstance().shutdown();
-        EventLogger.getEventLogger().shutdownEventLogger();
     }
 
     public static List<NamedEntry> getAllAccounts() throws ServiceException {
@@ -72,6 +73,7 @@ public class EventBackFillFromDB {
         options.setFilter(filter);
         options.setTypes(SearchDirectoryOptions.ObjectType.accounts);
         List<NamedEntry> accounts = Provisioning.getInstance().searchDirectory(options);
+        //TODO: Remove this print loop
         System.out.println("Printing Accounts");
         for (NamedEntry account : accounts) {
             System.out.println(account.getName() + " " + account.getId());
@@ -84,19 +86,22 @@ public class EventBackFillFromDB {
         return oneYearBack.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(locale));
     }
 
-    public void execute() throws Exception {
+    public void execute(Integer accNum, Integer batchSize, Integer numThread) throws Exception {
         ZimbraLog.event.info("Starting the Event Backfill");
         try {
-            init();
-            ExecutorService executor = Executors.newFixedThreadPool(10);
+            init(batchSize, numThread);
+            ExecutorService executor = Executors.newFixedThreadPool(2);
             List<NamedEntry> accounts = getAllAccounts();
-            CountDownLatch numberOfAccountsToProcess = new CountDownLatch(accounts.size());
-            for (NamedEntry acc : accounts) {
-                Account account = Provisioning.getInstance().getAccountById(acc.getId());
-                executor.execute(new GenerateEventsForAccountTask(account, numberOfAccountsToProcess));
+            int latchSize = accNum == null ? accounts.size() : 1;
+            CountDownLatch numberOfAccountsToProcess = new CountDownLatch(latchSize);
+            if(accNum == null) {
+                for (NamedEntry acc : accounts) {
+                    Account account = Provisioning.getInstance().getAccountById(acc.getId());
+                    executor.execute(new GenerateEventsForAccountTask(account, numberOfAccountsToProcess));
+                }
             }
+            Thread.sleep(10000);
             executor.shutdown();
-            System.out.println("Waiting for all account to process...");
             numberOfAccountsToProcess.await();
             System.out.println("Done!");
         } catch (ServiceException e) {
@@ -120,20 +125,21 @@ public class EventBackFillFromDB {
         public void run() {
             try {
                 Mailbox mbox = MailboxManager.getInstance().getMailboxByAccount(account, MailboxManager.FetchMode.DO_NOT_AUTOCREATE);
+                if(mbox != null) {
+                    StringBuilder queryBuilder = new StringBuilder();
+                    queryBuilder.append("after:").append(getOneYearBackDate(account.getLocale()));
+                    SearchParams params = new SearchParams();
+                    params.setQueryString(queryBuilder.toString());
+                    params.setLocale(account.getLocale());
+                    Set<MailItem.Type> types = new HashSet<>();
+                    types.add(MailItem.Type.MESSAGE);
+                    params.setTypes(types);
+                    params.setLimit(10000000);
+                    params.setSortBy(SortBy.DATE_ASC);
 
-                StringBuilder queryBuilder = new StringBuilder();
-                queryBuilder.append("after:").append(getOneYearBackDate(account.getLocale()));
-                SearchParams params = new SearchParams();
-                params.setQueryString(queryBuilder.toString());
-                params.setLocale(account.getLocale());
-                Set<MailItem.Type> types = new HashSet<>();
-                types.add(MailItem.Type.MESSAGE);
-                params.setTypes(types);
-                params.setLimit(10000000);
-                params.setSortBy(SortBy.DATE_ASC);
-
-                ZimbraQueryResults results = mbox.index.search(new OperationContext(mbox), params);
-                generateEvents(mbox, results);
+                    ZimbraQueryResults results = mbox.index.search(new OperationContext(mbox), params);
+                    generateEvents(mbox, results);
+                }
             } catch (ServiceException e) {
                 e.printStackTrace();
             } finally {
@@ -142,7 +148,6 @@ public class EventBackFillFromDB {
         }
 
         private void generateEvents(Mailbox mbox, ZimbraQueryResults results) throws ServiceException {
-            List<Event> finalEvents = new ArrayList<>();
             EventLogger logger = EventLogger.getEventLogger();
             while (results.hasNext()) {
                 ZimbraHit result = results.getNext();
@@ -151,44 +156,12 @@ public class EventBackFillFromDB {
                 //SENT folder ID is 5. Emails in the SENT folder should generate SENT events.
                 if(mailItem.getFolderId() == 5) {
                     logger.log(Event.generateSentEvents(msg, mailItem.getDate()));
-                } //Generate RECEIVED events for emails in all other folders.
+                } //Generate RECEIVED and AFFINITY events for emails in all other folders.
                 else {
                     logger.log(Event.generateReceivedEvent(msg, mbox.getAccount().getName(), mailItem.getDate()));
+                    logger.log(Event.generateAffinityEvents(msg, mbox.getAccount().getName(), mailItem.getDate()));
                 }
-                //Generate AFFINITY events for all emails.
-                logger.log(Event.generateAffinityEvents(msg, mbox.getAccount().getName(), mailItem.getDate()));
             }
         }
-    }
-
-    public static class Email {
-        String accountId;
-        int id;
-        int folder_id;
-        String sender;
-        String recipients;
-        String subject;
-
-        public Email(String accountId, int id, int folder_id, String sender, String recipients, String subject) {
-            this.accountId = accountId;
-            this.id = id;
-            this.folder_id = folder_id;
-            this.sender = sender;
-            this.recipients = recipients;
-            this.subject = subject;
-        }
-
-        @Override
-        public String toString() {
-            return "Email{" +
-                    "accountId='" + accountId + '\'' +
-                    ", id=" + id +
-                    ", folder_id=" + folder_id +
-                    ", sender='" + sender + '\'' +
-                    ", recipients='" + recipients + '\'' +
-                    ", subject='" + subject + '\'' +
-                    '}';
-        }
-
     }
 }
